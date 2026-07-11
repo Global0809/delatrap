@@ -1,0 +1,8 @@
+# local dev / editor cruft — not needed for the hosted site
+backups/
+.claude/
+snap.png
+*.log
+node_modules/
+.DS_Store
+Thumbs.db
