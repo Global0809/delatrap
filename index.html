@@ -937,18 +937,28 @@ let singerHead, singerGun, singerMuzzle, singerFlash, singerFlashLight, armR, ar
 
   /* articulated arms — shoulder -> upper -> elbow -> fore -> hand (mocap-drivable) */
   function buildArm(side) {
-    const shoulder = new THREE.Group(); shoulder.position.set(side * 0.26, 0.86, 0);
+    const shoulder = new THREE.Group(); shoulder.position.set(side * 0.26, 0.86, 0); shoulder.rotation.order = 'ZXY';
     const upper = box(0.13, 0.34, 0.14, skin); upper.geometry = upper.geometry.clone(); upper.geometry.translate(0, -0.17, 0); shoulder.add(upper);
     for (let i = 0; i < 2; i++) { const t = box(0.135, 0.055, 0.145, ink); t.position.y = -0.09 - i * 0.12; shoulder.add(t); }
-    const elbow = new THREE.Group(); elbow.position.y = -0.34; shoulder.add(elbow);
+    const elbow = new THREE.Group(); elbow.position.y = -0.34; elbow.rotation.order = 'ZXY'; shoulder.add(elbow);
     const fore = box(0.11, 0.3, 0.12, skin); fore.geometry = fore.geometry.clone(); fore.geometry.translate(0, -0.15, 0); elbow.add(fore);
     const tf = box(0.115, 0.05, 0.125, ink); tf.position.y = -0.1; elbow.add(tf);
-    const hand = box(0.1, 0.11, 0.09, skin); hand.position.y = -0.3; elbow.add(hand);
     const band2 = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.014, 6, 12), side > 0 ? goldM : silverM);
     band2.rotation.x = Math.PI / 2; band2.position.y = -0.26; elbow.add(band2);
+    /* hand + 5 articulated fingers (driven by finger tracking) */
+    const hand = new THREE.Group(); hand.position.y = -0.3; elbow.add(hand);
+    const palm = box(0.11, 0.075, 0.11, skin); palm.position.y = -0.035; hand.add(palm);
+    const fingers = [];
+    const fdef = [{ x: side * 0.062, len: 0.075, rz: side * 0.85 }, { x: 0.033, len: 0.11 }, { x: 0.011, len: 0.12 }, { x: -0.012, len: 0.11 }, { x: -0.035, len: 0.088 }];
+    for (const d of fdef) {
+      const fg = new THREE.Group(); fg.position.set(d.x, -0.06, 0.028); fg.rotation.order = 'ZXY'; if (d.rz) fg.rotation.z = d.rz;
+      const seg = box(0.019, d.len, 0.021, skin); seg.geometry = seg.geometry.clone(); seg.geometry.translate(0, -d.len / 2, 0); fg.add(seg);
+      const knuck = box(0.022, 0.02, 0.024, skin); knuck.position.y = -d.len * 0.55; fg.add(knuck);
+      hand.add(fg); fingers.push(fg);
+    }
     shoulder.rotation.z = side * 0.14;
     singer.add(shoulder);
-    return { shoulder, elbow, hand };
+    return { shoulder, elbow, hand, fingers };
   }
   armR = buildArm(1); armL = buildArm(-1);
 
@@ -2030,11 +2040,13 @@ const handhud = document.getElementById('handhud');
 const handmsg = document.getElementById('handmsg');
 let mocapOn = false, poseLandmarker = null, handLandmarker = null, mocapStream = null, mocapBusy = false;
 let lastPoseSeen = -9, poseGunCd = 0, poseFire = false, poseGunShow = false, handEnergy = 0;
-let poseLM = null, poseWL = null, poseLeanZ = 0, poseHeadY = 0, poseRecoil = 0, poseRootX = 0, poseFireDir = null;
+let poseLM = null, poseLeanZ = 0, poseHeadY = 0, poseRecoil = 0, poseRootX = 0, poseFireDir = null;
+let poseArmR = null, poseArmL = null, poseLegR = null, poseLegL = null, poseFingersR = null, poseFingersL = null;
 const poseHeadT = { x: 0, z: 0 };
-const REST = new THREE.Vector3(0, -1, 0);
-const PCFG = { mx: -1, my: -1, mz: 1 };   // world-landmark axis signs -> singer-local (flip any to calibrate)
+/* dz = depth gain (0 = pure smooth 2D mirror; raise for 3D reach). handSwap/mirror flips if sides feel wrong. */
+const PCFG = { dz: 1.6, mirror: true, handSwap: false, headGain: 1.0 };
 const clamp3 = (a, b, v) => Math.max(a, Math.min(b, v));
+const wrapC = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return clamp3(-2.5, 2.5, a); };
 const POSE_LINKS = [[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[0,11],[0,12]];
 const HAND_LINKS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
 
@@ -2073,10 +2085,25 @@ function disablePose() {
   bHand.classList.add('off'); bHand.title = 'Motion capture (webcam)';
   if (mocapStream) { mocapStream.getTracks().forEach(t => t.stop()); mocapStream = null; }
   handvid.srcObject = null;
-  poseLM = poseWL = null;
+  poseLM = null;
 }
-function boneDir(wl, i, j) {
-  return new THREE.Vector3(PCFG.mx * (wl[j].x - wl[i].x), PCFG.my * (wl[j].y - wl[i].y), PCFG.mz * (wl[j].z - wl[i].z));
+/* arm/leg angles in the mirrored image plane (2D = rock-solid sync) + optional depth from world-z */
+function arm2D(lms, wl, vis, sI, eI, wI) {
+  if (!vis(sI) || !vis(eI)) return null;
+  const M = PCFG.mirror ? -1 : 1;
+  const s = lms[sI], e = lms[eI], w = vis(wI) ? lms[wI] : e;
+  const sz = Math.atan2(M * (e.x - s.x), e.y - s.y);
+  const fz = Math.atan2(M * (w.x - e.x), w.y - e.y);
+  const ez = wrapC(fz - sz);
+  let sx = 0, ex = 0;
+  if (wl && wl[sI] && wl[eI]) sx = clamp3(-1.2, 1.2, (wl[eI].z - wl[sI].z) * PCFG.dz);
+  if (wl && wl[eI] && wl[wI]) ex = clamp3(-1.2, 1.2, (wl[wI].z - wl[eI].z) * PCFG.dz);
+  return { sz, ez, sx, ex };
+}
+function fingerCurl(h, a, b, c) {
+  const v1x = h[b].x - h[a].x, v1y = h[b].y - h[a].y, v2x = h[c].x - h[b].x, v2y = h[c].y - h[b].y;
+  const d = (v1x * v2x + v1y * v2y) / ((Math.hypot(v1x, v1y) || 1) * (Math.hypot(v2x, v2y) || 1));
+  return clamp3(0, 1.55, (1 - d) * 1.35);
 }
 function fingerExt(h, tip, pip) { return Math.hypot(h[tip].x - h[0].x, h[tip].y - h[0].y) > Math.hypot(h[pip].x - h[0].x, h[pip].y - h[0].y) * 1.05; }
 function isGun(h) { return fingerExt(h, 8, 6) && !fingerExt(h, 12, 10) && !fingerExt(h, 16, 14) && !fingerExt(h, 20, 18); }
@@ -2088,6 +2115,7 @@ function drawSkel(pts, links, ptCol, lineCol, dotR, W, H) {
   for (const p of pts) { if (!p) continue; const q = px(p); hctx.beginPath(); hctx.arc(q[0], q[1], dotR, 0, 7); hctx.fill(); }
   hctx.shadowBlur = 0;
 }
+const FINGER_LM = [[2,3,4],[5,6,8],[9,10,12],[13,14,16],[17,18,20]];
 function poseLoop(ts) {
   if (!mocapOn) return;
   requestAnimationFrame(poseLoop);
@@ -2107,49 +2135,64 @@ function poseLoop(ts) {
   let anySeen = false;
   if (lms) {
     drawSkel(lms, POSE_LINKS, '#ff2ed9', '#45e8ff', 2.6, W, H);
-    poseLM = lms; poseWL = wl; anySeen = true;
+    poseLM = lms; anySeen = true;
     const vis = (i) => lms[i] && (lms[i].visibility == null || lms[i].visibility > 0.4);
+    poseArmR = arm2D(lms, wl, vis, 12, 14, 16);
+    poseArmL = arm2D(lms, wl, vis, 11, 13, 15);
+    poseLegR = arm2D(lms, wl, vis, 24, 26, 28);
+    poseLegL = arm2D(lms, wl, vis, 23, 25, 27);
     if (vis(0) && vis(11) && vis(12)) {
       const mx = (lms[11].x + lms[12].x) / 2, my = (lms[11].y + lms[12].y) / 2;
-      poseHeadT.z = clamp3(-0.75, 0.75, (mx - lms[0].x) * 5.5);
-      poseHeadT.x = clamp3(-0.7, 0.85, (lms[0].y - my + 0.16) * 4.5);
-      poseHeadY = clamp3(-0.8, 0.8, (mx - lms[0].x) * 4.5);
+      poseHeadT.z = clamp3(-0.7, 0.7, (mx - lms[0].x) * 5);
+      poseHeadT.x = clamp3(-0.6, 0.8, (lms[0].y - my + 0.16) * 4);
+      poseHeadY = clamp3(-0.7, 0.7, (mx - lms[0].x) * 4);
     }
     if (vis(11) && vis(12) && vis(23) && vis(24)) {
       const smx = (lms[11].x + lms[12].x) / 2, hmx = (lms[23].x + lms[24].x) / 2;
-      poseLeanZ = clamp3(-0.45, 0.45, (hmx - smx) * 3.2); poseRootX = 0.5 - hmx;
+      poseLeanZ = clamp3(-0.4, 0.4, (hmx - smx) * 3); poseRootX = 0.5 - hmx;
     }
-  } else { poseLM = null; poseWL = null; }
+  } else poseLM = null;
+  poseFingersR = null; poseFingersL = null;
   let gun = false, gunDir = null;
   if (hres && hres.landmarks) {
     for (let hi = 0; hi < hres.landmarks.length; hi++) {
       const h = hres.landmarks[hi]; anySeen = true;
       drawSkel(h, HAND_LINKS, '#ffe08a', '#ff7ae0', 2.0, W, H);
+      const isRight = !!(hres.handedness && hres.handedness[hi] && hres.handedness[hi][0].categoryName === 'Right');
+      const curls = FINGER_LM.map(f => fingerCurl(h, f[0], f[1], f[2]));
+      if (isRight !== PCFG.handSwap) poseFingersR = curls; else poseFingersL = curls;
       if (isGun(h)) {
-        gun = true; const hw = hres.worldLandmarks && hres.worldLandmarks[hi];
-        if (hw) gunDir = new THREE.Vector3(PCFG.mx * (hw[8].x - hw[5].x), PCFG.my * (hw[8].y - hw[5].y), PCFG.mz * (hw[8].z - hw[5].z));
+        gun = true; const wh = hres.worldLandmarks && hres.worldLandmarks[hi]; const M = PCFG.mirror ? -1 : 1;
+        if (wh) gunDir = new THREE.Vector3(M * (wh[8].x - wh[5].x), -(wh[8].y - wh[5].y), -(wh[8].z - wh[5].z));
       }
     }
   }
   poseGunShow = gun;
   if (gun) { handmsg.textContent = 'FIRE 🔫'; if (poseGunCd <= 0) { poseFire = true; poseFireDir = gunDir; poseGunCd = 0.16; } }
-  else if (lms) handmsg.textContent = 'tracking';
+  else if (lms) handmsg.textContent = 'synced';
   else if (now - lastPoseSeen > 400) handmsg.textContent = 'step into frame';
   if (anySeen) lastPoseSeen = now;
 }
-const _q = new THREE.Quaternion(), _iq = new THREE.Quaternion();
-function orient(group, dir, lp) { if (dir.lengthSq() < 1e-4) return; _q.setFromUnitVectors(REST, dir.normalize()); group.quaternion.slerp(_q, lp); }
-function driveChain(a, si, ei, wi, lp, visOK) {
-  if (!poseWL || !poseWL[si] || !poseWL[ei]) return;
-  if (!visOK) { a.shoulder.quaternion.slerp(_iq.identity(), lp); a.elbow.quaternion.slerp(_iq.identity(), lp); return; }
-  orient(a.shoulder, boneDir(poseWL, si, ei), lp);
-  if (poseWL[wi]) { const fo = boneDir(poseWL, ei, wi); if (fo.lengthSq() > 1e-4) { fo.normalize().applyQuaternion(_iq.copy(a.shoulder.quaternion).invert()); _q.setFromUnitVectors(REST, fo); a.elbow.quaternion.slerp(_q, lp); } }
+function applyLimb(a, t, restZ, visOK, lp) {
+  if (!t || !visOK) {
+    a.shoulder.rotation.z += (restZ - a.shoulder.rotation.z) * lp; a.shoulder.rotation.x += (0 - a.shoulder.rotation.x) * lp;
+    a.elbow.rotation.z += (0 - a.elbow.rotation.z) * lp; a.elbow.rotation.x += (0 - a.elbow.rotation.x) * lp; return;
+  }
+  a.shoulder.rotation.z += (t.sz - a.shoulder.rotation.z) * lp;
+  a.shoulder.rotation.x += (t.sx - a.shoulder.rotation.x) * lp;
+  a.elbow.rotation.z += (t.ez - a.elbow.rotation.z) * lp;
+  a.elbow.rotation.x += (t.ex - a.elbow.rotation.x) * lp;
 }
-function driveLegChain(l, hi, ki, ai, lp, visOK) {
-  if (!poseWL || !poseWL[hi] || !poseWL[ki]) return;
-  if (!visOK) { l.hip.quaternion.slerp(_iq.identity(), lp); l.knee.quaternion.slerp(_iq.identity(), lp); return; }
-  orient(l.hip, boneDir(poseWL, hi, ki), lp);
-  if (poseWL[ai]) { const sh = boneDir(poseWL, ki, ai); if (sh.lengthSq() > 1e-4) { sh.normalize().applyQuaternion(_iq.copy(l.hip.quaternion).invert()); _q.setFromUnitVectors(REST, sh); l.knee.quaternion.slerp(_q, lp); } }
+function applyLeg(l, t, restZ, visOK, lp) {
+  if (!t || !visOK) { l.hip.rotation.z += (restZ - l.hip.rotation.z) * lp; l.hip.rotation.x += (0 - l.hip.rotation.x) * lp; l.knee.rotation.z += (0 - l.knee.rotation.z) * lp; l.knee.rotation.x += (0 - l.knee.rotation.x) * lp; return; }
+  l.hip.rotation.z += (t.sz - l.hip.rotation.z) * lp;
+  l.hip.rotation.x += (t.sx - l.hip.rotation.x) * lp;
+  l.knee.rotation.z += (t.ez - l.knee.rotation.z) * lp;
+  l.knee.rotation.x += (t.ex - l.knee.rotation.x) * lp;
+}
+function applyFingers(a, curls, lp) {
+  if (!a.fingers) return;
+  for (let i = 0; i < 5; i++) { const c = curls ? curls[i] : 0; a.fingers[i].rotation.x += (-c - a.fingers[i].rotation.x) * lp; }
 }
 function updatePoseControl(dt) {
   handEnergy = Math.max(0, handEnergy - dt * 1.6);
@@ -2157,19 +2200,19 @@ function updatePoseControl(dt) {
   if (!poseOn) return;
   poseGunCd -= dt;
   const recent = performance.now() - lastPoseSeen < 700;
-  const lp = Math.min(1, dt * 12);
+  const lp = Math.min(1, dt * 16);      // smooth + in time; gain 1.0 (no amplification)
   if (recent && poseLM) {
     const v = (i) => poseLM[i] && (poseLM[i].visibility == null || poseLM[i].visibility > 0.35);
-    driveChain(armR, 12, 14, 16, lp, v(14));      // 3D arms from world-landmarks
-    driveChain(armL, 11, 13, 15, lp, v(13));
-    driveLegChain(legR, 24, 26, 28, lp, v(26));   // 3D legs (neutral when not in frame)
-    driveLegChain(legL, 23, 25, 27, lp, v(25));
-    singerHead.rotation.x += (poseHeadT.x * 1.3 - singerHead.rotation.x) * lp;
-    singerHead.rotation.z += (poseHeadT.z * 1.3 - singerHead.rotation.z) * lp;
-    singerHead.rotation.y += (poseHeadY * 1.3 - singerHead.rotation.y) * lp;
+    applyLimb(armR, poseArmR, 0.14, v(14), lp); applyLimb(armL, poseArmL, -0.14, v(13), lp);
+    applyLeg(legR, poseLegR, -0.03, v(26), lp); applyLeg(legL, poseLegL, 0.03, v(25), lp);
+    applyFingers(armR, poseFingersR, lp); applyFingers(armL, poseFingersL, lp);
+    const hg = PCFG.headGain;
+    singerHead.rotation.x += (poseHeadT.x * hg - singerHead.rotation.x) * lp;
+    singerHead.rotation.z += (poseHeadT.z * hg - singerHead.rotation.z) * lp;
+    singerHead.rotation.y += (poseHeadY * hg - singerHead.rotation.y) * lp;
     singer.rotation.z += (poseLeanZ - singer.rotation.z) * lp;
-    const tx = clamp3(-2.55, -0.5, -1.55 + poseRootX * 3.2);
-    singer.position.x += (tx - singer.position.x) * Math.min(1, dt * 8);
+    const tx = clamp3(-2.55, -0.5, -1.55 + poseRootX * 2.8);
+    singer.position.x += (tx - singer.position.x) * Math.min(1, dt * 9);
   }
   singerGun.visible = !!poseGunShow;
   if (poseFire) {
@@ -2181,7 +2224,7 @@ function updatePoseControl(dt) {
     fireSingerShot(dir); handEnergy = 1;
   }
 }
-window.__poseCfg = PCFG;   // runtime calibration hook (flip signs live if arms/legs feel mirrored)
+window.__poseCfg = PCFG;   // live calibration: __poseCfg.mirror (true/false), .dz (0=flat, higher=more depth), .handSwap
 bHand.addEventListener('click', () => { if (mocapBusy && !mocapOn) return; mocapOn ? disablePose() : enablePose(); });
 
 /* ============================== MAIN LOOP ============================== */
