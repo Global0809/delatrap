@@ -32,7 +32,8 @@
   html, body { width: 100%; height: 100%; overflow: hidden; background: var(--deep); }
   body { font-family: 'Segoe UI', system-ui, sans-serif; color: #f3e8ff; }
   canvas { display: block; }
-  #scene { position: fixed; inset: 0; cursor: grab; }
+  #scene { position: fixed; inset: 0; cursor: grab; touch-action: none; -ms-touch-action: none; }
+  #scene canvas { touch-action: none; }
   #scene.dragging { cursor: grabbing; }
 
   /* cinematic vignette + faint scanlines */
@@ -253,7 +254,7 @@
       <div class="ibtn" id="bSfx" title="Sound FX">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 9v6h3.5L13 19V5L7.5 9H4z" fill="currentColor" stroke="none"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/><path d="M19 6a8.5 8.5 0 0 1 0 12"/></svg>
       </div>
-      <div class="ibtn off" id="bHand" title="Hand control (webcam)">
+      <div class="ibtn off" id="bHand" title="Body motion capture (webcam)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 11V6a1.3 1.3 0 0 1 2.6 0v4.5m0-.5V4.6a1.3 1.3 0 0 1 2.6 0V10m0-.2V5.3a1.3 1.3 0 0 1 2.6 0V12m0-2.1a1.3 1.3 0 0 1 2.6 0v3.5c0 3-2.1 5.6-5.5 5.6-2.3 0-3.5-.8-4.8-2.5l-2.3-3.1a1.35 1.35 0 0 1 2.1-1.7L8 13"/></svg>
       </div>
       <div class="ibtn" id="bReset" title="Reset view">
@@ -268,7 +269,7 @@
 <div id="handhud">
   <div class="frame">
     <canvas id="handcanvas" width="200" height="150"></canvas>
-    <div class="lbl"><span class="dot"></span>HAND&nbsp;CONTROL</div>
+    <div class="lbl"><span class="dot"></span>MOTION&nbsp;CAPTURE</div>
     <div class="brackets"></div>
     <div id="handmsg">off</div>
   </div>
@@ -873,67 +874,161 @@ containerCar(-9.7, 0x45e8ff, true);
 containerCar(-13.3, 0xb03bff, false);
 containerCar(-16.9, 0x39ff9e, true);
 
-/* ============================== THE SINGER ============================== */
+/* ============================== THE SINGER (modeled on the artist) ============================== */
 const singer = new THREE.Group();
-let strumArm, fretArm, singerHead, singerGun, singerMuzzle, singerFlash, singerFlashLight;
+let singerHead, singerGun, singerMuzzle, singerFlash, singerFlashLight, armR, armL, singerGuitar, singerTorso;
 {
-  const skin = new THREE.MeshStandardMaterial({ color: 0x120d1d, roughness: .6, flatShading: true });
-  for (const s of [-1, 1]) {
-    const leg = box(0.1, 0.44, 0.12, skin); leg.position.set(s * 0.09, 0.22, 0); singer.add(leg);
-    const boot = box(0.12, 0.07, 0.2, matDark2); boot.position.set(s * 0.09, 0.035, 0.03); singer.add(boot);
-  }
-  const torso = box(0.36, 0.46, 0.22, skin); torso.position.y = 0.67; singer.add(torso);
-  const jacketLine = box(0.37, 0.04, 0.23, matPink); jacketLine.position.y = 0.48; singer.add(jacketLine);
+  const skin  = new THREE.MeshStandardMaterial({ color: 0xca8b5c, roughness: .7, metalness: 0, emissive: 0x2a160a, emissiveIntensity: .35, flatShading: true });
+  const ink   = new THREE.MeshStandardMaterial({ color: 0x6b4630, roughness: .75, metalness: 0, flatShading: true });   // tattoo shading
+  const blue  = new THREE.MeshStandardMaterial({ color: 0x1f42d6, roughness: .5, metalness: .1, flatShading: true });
+  const blueHi= new THREE.MeshStandardMaterial({ color: 0x3f6bff, roughness: .4, flatShading: true });
+  const goldM = new THREE.MeshStandardMaterial({ color: 0xffd23e, roughness: .25, metalness: .9, flatShading: true });
+  const silverM = new THREE.MeshStandardMaterial({ color: 0xcfd3da, roughness: .2, metalness: .9, flatShading: true });
+  const pants = new THREE.MeshStandardMaterial({ color: 0x14121c, roughness: .6, flatShading: true });
+  const lensM = new THREE.MeshBasicMaterial({ color: 0x8a1420, toneMapped: false });   // dark-red shades (no specular)
 
-  singerHead = new THREE.Group(); singerHead.position.y = 1.0;
-  const head = box(0.19, 0.19, 0.2, skin); singerHead.add(head);
-  const capB = box(0.21, 0.05, 0.22, matDark2); capB.position.y = 0.1; singerHead.add(capB);
-  const capP = box(0.1, 0.03, 0.16, matDark2); capP.position.set(0, 0.07, 0.16); singerHead.add(capP);
-  const band = new THREE.Mesh(new THREE.TorusGeometry(0.125, 0.022, 6, 14, Math.PI), matCyan);
-  band.rotation.z = 0; band.position.y = 0.04; singerHead.add(band);
+  /* legs + sneakers */
   for (const s of [-1, 1]) {
-    const cup = cyl(0.05, 0.05, 0.04, 8, matDark2); cup.rotation.z = Math.PI / 2;
-    cup.position.set(s * 0.115, 0, 0); singerHead.add(cup);
+    const leg = box(0.13, 0.5, 0.15, pants); leg.position.set(s * 0.1, 0.25, 0); singer.add(leg);
+    const shoe = box(0.15, 0.08, 0.26, matDark2); shoe.position.set(s * 0.1, 0.04, 0.05); singer.add(shoe);
+    const lace = box(0.15, 0.02, 0.02, matCyan); lace.position.set(s * 0.1, 0.11, 0.14); singer.add(lace);
   }
+
+  /* blue sleeveless jersey */
+  singerTorso = new THREE.Group(); singerTorso.position.y = 0.5; singer.add(singerTorso);
+  const chest = box(0.44, 0.34, 0.26, blue); chest.position.y = 0.28; singerTorso.add(chest);
+  const belly = box(0.4, 0.2, 0.24, blue); belly.position.y = 0.05; singerTorso.add(belly);
+  const vtrim = box(0.16, 0.12, 0.02, matDark2); vtrim.position.set(0, 0.4, 0.135); singerTorso.add(vtrim);
+  for (const s of [-1, 1]) { const strap = box(0.08, 0.22, 0.28, blueHi); strap.position.set(s * 0.2, 0.36, 0); singerTorso.add(strap); }
+  const graphic = box(0.14, 0.18, 0.02, new THREE.MeshStandardMaterial({ color: 0xdfe8ff, emissive: 0x11223a, roughness: .5, flatShading: true }));
+  graphic.position.set(0, 0.22, 0.135); singerTorso.add(graphic);
+  const chain = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.028, 8, 20), goldM);
+  chain.rotation.x = 1.35; chain.position.set(0, 0.44, 0.06); singerTorso.add(chain);
+  const pend = box(0.07, 0.09, 0.03, goldM); pend.position.set(0, 0.34, 0.14); singerTorso.add(pend);
+
+  /* neck + bald head */
+  const neck = cyl(0.07, 0.08, 0.12, 8, skin); neck.position.y = 0.92; singer.add(neck);
+  singerHead = new THREE.Group(); singerHead.position.y = 1.06;
+  const head = box(0.2, 0.22, 0.21, skin); singerHead.add(head);
+  const jaw = box(0.17, 0.08, 0.19, skin); jaw.position.y = -0.12; singerHead.add(jaw);
+  for (const s of [-1, 1]) {
+    const ear = box(0.03, 0.07, 0.05, skin); ear.position.set(s * 0.11, -0.01, 0); singerHead.add(ear);
+    const stud = box(0.02, 0.02, 0.02, goldM); stud.position.set(s * 0.11, -0.05, 0.02); singerHead.add(stud);
+  }
+  /* round tinted sunglasses (matte gold rims so they don't flare cyan-green) */
+  const rimGold = new THREE.MeshStandardMaterial({ color: 0xe6b23a, roughness: .55, metalness: .25, flatShading: true });
+  for (const s of [-1, 1]) {
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.011, 6, 16), rimGold); rim.position.set(s * 0.06, 0, 0.106); singerHead.add(rim);
+    const lens = new THREE.Mesh(new THREE.CircleGeometry(0.054, 16), lensM); lens.position.set(s * 0.06, 0, 0.104); singerHead.add(lens);
+    const tmpl = box(0.1, 0.012, 0.012, rimGold); tmpl.position.set(s * 0.11, 0.01, 0.05); singerHead.add(tmpl);
+  }
+  const bridge = box(0.05, 0.012, 0.012, rimGold); bridge.position.set(0, 0.01, 0.108); singerHead.add(bridge);
+  /* goatee + mustache */
+  const goatee = box(0.09, 0.06, 0.04, matDark2); goatee.position.set(0, -0.13, 0.09); singerHead.add(goatee);
+  const mous = box(0.11, 0.02, 0.03, matDark2); mous.position.set(0, -0.06, 0.105); singerHead.add(mous);
   singer.add(singerHead);
 
-  /* guitar */
-  const guitar = new THREE.Group();
+  /* articulated arms — shoulder -> upper -> elbow -> fore -> hand (mocap-drivable) */
+  function buildArm(side) {
+    const shoulder = new THREE.Group(); shoulder.position.set(side * 0.26, 0.86, 0);
+    const upper = box(0.13, 0.34, 0.14, skin); upper.geometry = upper.geometry.clone(); upper.geometry.translate(0, -0.17, 0); shoulder.add(upper);
+    for (let i = 0; i < 2; i++) { const t = box(0.135, 0.055, 0.145, ink); t.position.y = -0.09 - i * 0.12; shoulder.add(t); }
+    const elbow = new THREE.Group(); elbow.position.y = -0.34; shoulder.add(elbow);
+    const fore = box(0.11, 0.3, 0.12, skin); fore.geometry = fore.geometry.clone(); fore.geometry.translate(0, -0.15, 0); elbow.add(fore);
+    const tf = box(0.115, 0.05, 0.125, ink); tf.position.y = -0.1; elbow.add(tf);
+    const hand = box(0.1, 0.11, 0.09, skin); hand.position.y = -0.3; elbow.add(hand);
+    const band2 = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.014, 6, 12), side > 0 ? goldM : silverM);
+    band2.rotation.x = Math.PI / 2; band2.position.y = -0.26; elbow.add(band2);
+    shoulder.rotation.z = side * 0.14;
+    singer.add(shoulder);
+    return { shoulder, elbow, hand };
+  }
+  armR = buildArm(1); armL = buildArm(-1);
+
+  /* guitar (hidden while mocap puppeteers the body) */
+  singerGuitar = new THREE.Group();
   const wood = new THREE.MeshStandardMaterial({ color: 0xb2652a, roughness: .55, emissive: 0x552800, emissiveIntensity: .25, flatShading: true });
-  const gb = box(0.34, 0.3, 0.09, wood); guitar.add(gb);
-  const gb2 = box(0.26, 0.34, 0.09, wood); gb2.position.set(0.1, 0, 0); guitar.add(gb2);
-  const hole = cyl(0.055, 0.055, 0.1, 8, matDark2); hole.rotation.x = Math.PI / 2; hole.position.set(0.05, 0, 0.01); guitar.add(hole);
-  const neckG = box(0.46, 0.06, 0.045, matDark2); neckG.position.set(-0.4, 0.06, 0); neckG.rotation.z = 0.22; guitar.add(neckG);
-  const headG = box(0.11, 0.08, 0.05, wood); headG.position.set(-0.64, 0.115, 0); headG.rotation.z = 0.22; guitar.add(headG);
-  guitar.position.set(0.02, 0.6, 0.22); guitar.rotation.y = 0.12;
-  singer.add(guitar);
+  const gb = box(0.34, 0.3, 0.09, wood); singerGuitar.add(gb);
+  const gb2 = box(0.26, 0.34, 0.09, wood); gb2.position.set(0.1, 0, 0); singerGuitar.add(gb2);
+  const ghole = cyl(0.055, 0.055, 0.1, 8, matDark2); ghole.rotation.x = Math.PI / 2; ghole.position.set(0.05, 0, 0.01); singerGuitar.add(ghole);
+  const neckG = box(0.46, 0.06, 0.045, matDark2); neckG.position.set(-0.4, 0.06, 0); neckG.rotation.z = 0.22; singerGuitar.add(neckG);
+  const headG = box(0.11, 0.08, 0.05, wood); headG.position.set(-0.64, 0.115, 0); headG.rotation.z = 0.22; singerGuitar.add(headG);
+  singerGuitar.position.set(0.02, 0.62, 0.24); singerGuitar.rotation.y = 0.12;
+  singer.add(singerGuitar);
 
-  fretArm = box(0.08, 0.3, 0.09, skin);
-  fretArm.geometry.translate(0, -0.15, 0);
-  fretArm.position.set(-0.2, 0.87, 0.08); fretArm.rotation.set(-0.9, 0, -0.9);
-  singer.add(fretArm);
-
-  strumArm = new THREE.Group(); strumArm.position.set(0.2, 0.87, 0.02);
-  const sa = box(0.08, 0.3, 0.09, skin); sa.geometry.translate(0, -0.15, 0); strumArm.add(sa);
-  strumArm.rotation.set(-0.7, 0, 0.5);
-  singer.add(strumArm);
-
-  /* pistol in the strum hand (shown only during the gun-fire move) */
-  singerGun = new THREE.Group(); singerGun.position.set(0.02, -0.3, 0.06); singerGun.visible = false;
+  /* pistol in the right hand */
+  singerGun = new THREE.Group(); singerGun.position.set(0, -0.32, 0.06); singerGun.visible = false;
   const gunMetal = new THREE.MeshStandardMaterial({ color: 0x15121f, roughness: .35, metalness: .8, flatShading: true });
   const grip = box(0.05, 0.12, 0.06, gunMetal); grip.position.set(-0.02, -0.05, 0); grip.rotation.z = 0.3; singerGun.add(grip);
   const slide = box(0.2, 0.06, 0.06, gunMetal); slide.position.set(0.08, 0.03, 0); singerGun.add(slide);
   const btip = box(0.06, 0.035, 0.035, neon(0xffd23e)); btip.position.set(0.19, 0.03, 0); singerGun.add(btip);
-  strumArm.add(singerGun);
+  armR.elbow.add(singerGun);
   singerMuzzle = new THREE.Object3D(); singerMuzzle.position.set(0.25, 0.03, 0); singerGun.add(singerMuzzle);
   singerFlash = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture('rgba(255,220,140,1)', 0.05), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
   singerFlash.scale.set(0.5, 0.5, 1); singerFlash.position.set(0.28, 0.03, 0); singerFlash.visible = false; singerGun.add(singerFlash);
   singerFlashLight = new THREE.PointLight(0xffd9a0, 0, 5, 2); singerFlashLight.position.set(0.28, 0.03, 0); singerGun.add(singerFlashLight);
 
-  singer.position.set(-1.55, 2.8, 0);
+  singer.position.set(-1.55, 2.78, 0);
   singer.rotation.y = 0.42;
-  singer.scale.setScalar(1.18);
+  singer.scale.setScalar(1.2);
   train.add(singer);
+}
+
+/* ============================== FEMALE DANCER (back of the train) ============================== */
+const dancer = new THREE.Group();
+let dSway, dArmL, dArmR, dHead, dHair;
+{
+  const dskin = new THREE.MeshStandardMaterial({ color: 0xd79a72, roughness: .65, metalness: 0, emissive: 0x2a160a, emissiveIntensity: .3, flatShading: true });
+  const dress = new THREE.MeshStandardMaterial({ color: 0xff2ea0, emissive: 0x66103f, emissiveIntensity: .55, roughness: .4, flatShading: true });
+  const dressHi = neon(0xff6ad5);
+  const hair = new THREE.MeshStandardMaterial({ color: 0x2a0f3a, emissive: 0x3a0f5a, emissiveIntensity: .45, roughness: .5, flatShading: true });
+
+  for (const s of [-1, 1]) {
+    const leg = box(0.09, 0.5, 0.1, dskin); leg.position.set(s * 0.08, 0.28, 0); dancer.add(leg);
+    const shoe = box(0.1, 0.05, 0.18, matDark2); shoe.position.set(s * 0.08, 0.03, 0.03); dancer.add(shoe);
+    const hh = box(0.04, 0.1, 0.04, matDark2); hh.position.set(s * 0.08, -0.01, -0.05); dancer.add(hh);
+  }
+  dSway = new THREE.Group(); dSway.position.y = 0.5; dancer.add(dSway);
+  const skirt = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.3, 8), dress); skirt.position.y = 0.04; dSway.add(skirt);
+  const dtorso = box(0.22, 0.3, 0.15, dress); dtorso.position.y = 0.34; dSway.add(dtorso);
+  const dtrim = box(0.24, 0.03, 0.16, dressHi); dtrim.position.y = 0.2; dSway.add(dtrim);
+  const belt = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.02, 6, 14), neon(0x45e8ff)); belt.rotation.x = Math.PI / 2; belt.position.y = 0.19; dSway.add(belt);
+
+  dHead = new THREE.Group(); dHead.position.y = 0.55; dSway.add(dHead);
+  const dhd = box(0.15, 0.17, 0.15, dskin); dHead.add(dhd);
+  dHair = new THREE.Group(); dHead.add(dHair);
+  const hairTop = box(0.17, 0.1, 0.18, hair); hairTop.position.y = 0.08; dHair.add(hairTop);
+  for (const s of [-1, 1]) { const strand = box(0.05, 0.36, 0.06, hair); strand.geometry = strand.geometry.clone(); strand.geometry.translate(0, -0.18, 0); strand.position.set(s * 0.085, 0.02, -0.05); dHair.add(strand); }
+  for (const s of [-1, 1]) { const eye = box(0.025, 0.02, 0.02, neon(0x45e8ff)); eye.position.set(s * 0.04, 0.02, 0.076); dHead.add(eye); }
+
+  function dArm(side) {
+    const sh = new THREE.Group(); sh.position.set(side * 0.14, 0.44, 0);
+    const up = box(0.07, 0.26, 0.08, dskin); up.geometry = up.geometry.clone(); up.geometry.translate(0, -0.13, 0); sh.add(up);
+    const el = new THREE.Group(); el.position.y = -0.26; sh.add(el);
+    const fo = box(0.06, 0.24, 0.07, dskin); fo.geometry = fo.geometry.clone(); fo.geometry.translate(0, -0.12, 0); el.add(fo);
+    const bangle = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.01, 6, 10), neon(0xffd23e)); bangle.rotation.x = Math.PI / 2; bangle.position.y = -0.22; el.add(bangle);
+    dSway.add(sh); return { sh, el };
+  }
+  dArmR = dArm(1); dArmL = dArm(-1);
+
+  dancer.position.set(-13.3, 2.56, 0);
+  dancer.rotation.y = -0.35;
+  dancer.scale.setScalar(1.12);
+  train.add(dancer);
+}
+function updateDancer(dt, t) {
+  const w1 = t * Math.PI * 2 * 1.16, bounce = Math.abs(Math.sin(w1));
+  dancer.position.y = 2.56 + bounce * (0.05 + bassS * 0.06);
+  dSway.rotation.z = Math.sin(w1) * 0.18;
+  dSway.position.x = Math.sin(w1) * 0.04;
+  dancer.rotation.y = -0.35 + Math.sin(t * 0.5) * 0.5;
+  const wave = Math.sin(t * Math.PI * 2 * 2.33);
+  dArmR.sh.rotation.set(-0.2, 0, 2.2 + wave * 0.45);
+  dArmL.sh.rotation.set(-0.2, 0, -2.2 - wave * 0.45);
+  dArmR.el.rotation.z = -0.4 + wave * 0.3;
+  dArmL.el.rotation.z = 0.4 - wave * 0.3;
+  dHead.rotation.set(bounce * 0.1, 0, Math.sin(w1) * 0.12);
+  dHair.rotation.z = -dSway.rotation.z * 0.5 + Math.sin(t * 3) * 0.06;
 }
 
 /* ============================== COWBOYS ============================== */
@@ -1253,7 +1348,7 @@ function updateSparks(dt) {
 }
 
 let goldK = 0, iceK = 0, singerPunch = 0, handRaise = 0;
-let singerMode = 'strum', singerModeT = 3.5, singerShots = 0, singerShotT = 0, singerFlashT = 0;
+let singerMode = 'strum', singerModeT = 3.5, singerShots = 0, singerShotT = 0, singerFlashT = 0, poseOn = false;
 const fogBase = new THREE.Color(COL.fog), fogIce = new THREE.Color(0x0a2a3e);
 function triggerSpecials(text) {
   if (/pyramid/i.test(text)) pyramidRise();
@@ -1774,7 +1869,7 @@ el.addEventListener('pointermove', e => {
   lastInteract = simT;
   if (pointers.size === 1) {
     const dx = e.clientX - prev[0], dy = e.clientY - prev[1];
-    cam.vaz = -dx * 0.0042; cam.vpol = -dy * 0.0032;
+    cam.vaz = -dx * 0.00336; cam.vpol = -dy * 0.00256;   // orbit sensitivity -20%
     cam.az += cam.vaz; cam.pol += cam.vpol;
   } else if (pointers.size === 2) {
     const p = [...pointers.values()];
@@ -1899,105 +1994,147 @@ addEventListener('keydown', e => {
   if (e.code === 'Space' && started) { e.preventDefault(); bPlay.click(); }
 });
 
-/* ============================== HAND-MOTION CONTROL (webcam + MediaPipe) ============================== */
+/* ============================== FULL-BODY MOTION CAPTURE (webcam + MediaPipe Pose) ==============================
+   Drives the singer's body (arms via shoulder+elbow angles, head, torso lean) — point your arm like a gun to fire.
+   Does NOT control the world camera. */
 const bHand = document.getElementById('bHand');
 const handvid = document.getElementById('handvid');
 const handcanvas = document.getElementById('handcanvas');
 const hctx = handcanvas.getContext('2d');
 const handhud = document.getElementById('handhud');
 const handmsg = document.getElementById('handmsg');
-let handOn = false, handLandmarker = null, handStream = null, handBusy = false;
-let handEnergy = 0, lastHandSeen = -9, prevOpen = 0;
-const handTarget = { az: null, pol: null, r: null };
-const HAND_LINKS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+let mocapOn = false, poseLandmarker = null, mocapStream = null, mocapBusy = false;
+let lastPoseSeen = -9, poseGunCd = 0, poseFire = false, poseGunShow = false, handEnergy = 0;
+const poseHeadT = { x: 0, z: 0 };
+let poseLeanZ = 0;
+const poseArmT = { R: null, L: null };
+const POSE_LINKS = [[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[0,11],[0,12]];
+const clampA = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return Math.max(-2.4, Math.min(2.4, a)); };
 
-async function initHandModel() {
-  if (handLandmarker) return true;
+async function initPoseModel() {
+  if (poseLandmarker) return true;
   handmsg.textContent = 'loading AI…';
   try {
     const V = '0.10.14';
     const vision = await import(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${V}`);
     const fileset = await vision.FilesetResolver.forVisionTasks(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${V}/wasm`);
-    handLandmarker = await vision.HandLandmarker.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task', delegate: 'GPU' },
-      runningMode: 'VIDEO', numHands: 1,
+    poseLandmarker = await vision.PoseLandmarker.createFromOptions(fileset, {
+      baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task', delegate: 'GPU' },
+      runningMode: 'VIDEO', numPoses: 1,
     });
     return true;
-  } catch (e) { showErr('Hand AI failed to load: ' + e.message); handmsg.textContent = 'AI load failed'; return false; }
+  } catch (e) { showErr('Motion-capture AI failed to load: ' + e.message); handmsg.textContent = 'AI load failed'; return false; }
 }
-async function enableHand() {
+async function enablePose() {
   handhud.classList.add('on'); handmsg.textContent = 'starting…';
-  if (!(await initHandModel())) { disableHand(); return; }
+  if (!(await initPoseModel())) { disablePose(); return; }
   handmsg.textContent = 'camera…';
   try {
-    handStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 480, height: 360 } });
-  } catch (e) { showErr('Camera blocked — hand control needs webcam access. Allow it and try again.'); handmsg.textContent = 'camera denied'; disableHand(); return; }
-  handvid.srcObject = handStream;
+    mocapStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } });
+  } catch (e) { showErr('Camera blocked — motion capture needs webcam access. Allow it and try again.'); handmsg.textContent = 'camera denied'; disablePose(); return; }
+  handvid.srcObject = mocapStream;
   try { await handvid.play(); } catch (e) {}
-  handOn = true; autoCam = false;
-  bHand.classList.remove('off'); bHand.title = 'Hand control: ON';
-  handmsg.textContent = 'show your hand';
-  requestAnimationFrame(handLoop);
+  mocapOn = true; poseOn = true;
+  bHand.classList.remove('off'); bHand.title = 'Motion capture: ON';
+  handmsg.textContent = 'step into frame';
+  requestAnimationFrame(poseLoop);
 }
-function disableHand() {
-  handOn = false; handhud.classList.remove('on');
-  bHand.classList.add('off'); bHand.title = 'Hand control (webcam)';
-  if (handStream) { handStream.getTracks().forEach(t => t.stop()); handStream = null; }
+function disablePose() {
+  mocapOn = false; poseOn = false; handhud.classList.remove('on');
+  bHand.classList.add('off'); bHand.title = 'Motion capture (webcam)';
+  if (mocapStream) { mocapStream.getTracks().forEach(t => t.stop()); mocapStream = null; }
   handvid.srcObject = null;
-  handTarget.az = handTarget.pol = handTarget.r = null;
+  poseArmT.R = poseArmT.L = null;
 }
-function handLoop(ts) {
-  if (!handOn) return;
-  requestAnimationFrame(handLoop);
-  if (!handLandmarker || handvid.readyState < 2 || handBusy) return;
-  handBusy = true;
+/* upper-arm & forearm angles in the mirrored image plane */
+function armAngles(lms, vis, sI, eI, wI) {
+  if (!vis(sI) || !vis(eI)) return null;
+  const s = lms[sI], e = lms[eI], w = vis(wI) ? lms[wI] : e;
+  const sz = Math.atan2(s.x - e.x, e.y - s.y);           // shoulder in-plane angle (arm down = 0)
+  const fz = Math.atan2(e.x - w.x, w.y - e.y);           // forearm angle
+  const ext = Math.hypot(w.x - s.x, w.y - s.y);          // extension
+  const u = [e.x - s.x, e.y - s.y], f = [w.x - e.x, w.y - e.y];
+  const un = Math.hypot(u[0], u[1]) || 1, fn = Math.hypot(f[0], f[1]) || 1;
+  const straight = (u[0] * f[0] + u[1] * f[1]) / (un * fn);
+  return { sz, ez: clampA(fz - sz), ext, straight };
+}
+function poseLoop(ts) {
+  if (!mocapOn) return;
+  requestAnimationFrame(poseLoop);
+  if (!poseLandmarker || handvid.readyState < 2 || mocapBusy) return;
+  mocapBusy = true;
   let res = null;
-  try { res = handLandmarker.detectForVideo(handvid, ts || performance.now()); } catch (e) {}
-  handBusy = false;
+  try { res = poseLandmarker.detectForVideo(handvid, ts || performance.now()); } catch (e) {}
+  mocapBusy = false;
   const W = handcanvas.width, H = handcanvas.height;
   hctx.clearRect(0, 0, W, H);
   hctx.save(); hctx.globalAlpha = 0.5; hctx.translate(W, 0); hctx.scale(-1, 1); hctx.drawImage(handvid, 0, 0, W, H); hctx.restore();
-  hctx.fillStyle = 'rgba(6,3,16,0.34)'; hctx.fillRect(0, 0, W, H);
-  if (res && res.landmarks && res.landmarks.length) {
-    const lm = res.landmarks[0];
+  hctx.fillStyle = 'rgba(6,3,16,0.36)'; hctx.fillRect(0, 0, W, H);
+  const lms = res && res.landmarks && res.landmarks[0];
+  if (lms) {
+    const vis = (i) => lms[i] && (lms[i].visibility == null || lms[i].visibility > 0.4);
     const px = (p) => [(1 - p.x) * W, p.y * H];
-    hctx.lineWidth = 2.4; hctx.strokeStyle = '#45e8ff'; hctx.shadowColor = '#45e8ff'; hctx.shadowBlur = 8;
-    hctx.beginPath();
-    for (const [a, b] of HAND_LINKS) { const A = px(lm[a]), B = px(lm[b]); hctx.moveTo(A[0], A[1]); hctx.lineTo(B[0], B[1]); }
+    hctx.lineWidth = 2.6; hctx.strokeStyle = '#45e8ff'; hctx.shadowColor = '#45e8ff'; hctx.shadowBlur = 8; hctx.beginPath();
+    for (const [a, b] of POSE_LINKS) { if (!vis(a) || !vis(b)) continue; const A = px(lms[a]), B = px(lms[b]); hctx.moveTo(A[0], A[1]); hctx.lineTo(B[0], B[1]); }
     hctx.stroke();
     hctx.shadowBlur = 10; hctx.fillStyle = '#ff2ed9';
-    for (const p of lm) { const q = px(p); hctx.beginPath(); hctx.arc(q[0], q[1], 2.5, 0, 7); hctx.fill(); }
+    for (const i of [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26]) { if (!vis(i)) continue; const q = px(lms[i]); hctx.beginPath(); hctx.arc(q[0], q[1], 2.7, 0, 7); hctx.fill(); }
     hctx.shadowBlur = 0;
-    const cx = 1 - lm[9].x, cy = lm[9].y;
-    const pinch = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y);
-    let openv = 0; for (const ti of [8, 12, 16, 20]) openv += Math.hypot(lm[ti].x - lm[0].x, lm[ti].y - lm[0].y); openv /= 4;
-    handTarget.az = CAM0.az + (cx - 0.5) * 3.6;
-    handTarget.pol = 0.35 + Math.max(0, Math.min(1, cy)) * 1.5;
-    handTarget.r = 8 + Math.max(0, Math.min(1, (pinch - 0.03) / 0.26)) * 26;
-    const openNow = Math.max(0, Math.min(1, (openv - 0.28) / 0.16));
-    if (openNow - prevOpen > 0.4) handEnergy = 1;          // quick spread => neon burst
-    prevOpen = openNow;
-    lastHandSeen = performance.now();
-    handmsg.textContent = pinch < 0.06 ? 'pinch · zoom' : 'tracking';
-  } else if (performance.now() - lastHandSeen > 350) {
-    handmsg.textContent = 'show your hand';
+
+    const aR = armAngles(lms, vis, 12, 14, 16);   // character right arm <- user right arm
+    const aL = armAngles(lms, vis, 11, 13, 15);   // character left arm  <- user left arm
+    poseArmT.R = aR ? { sz: aR.sz, ez: aR.ez } : null;
+    poseArmT.L = aL ? { sz: aL.sz, ez: aL.ez } : null;
+
+    if (vis(0) && vis(11) && vis(12)) {
+      const mx = (lms[11].x + lms[12].x) / 2, my = (lms[11].y + lms[12].y) / 2;
+      poseHeadT.z = Math.max(-0.5, Math.min(0.5, (mx - lms[0].x) * 3));
+      poseHeadT.x = Math.max(-0.4, Math.min(0.5, (lms[0].y - my + 0.16) * 2));
+    }
+    if (vis(11) && vis(12) && vis(23) && vis(24)) {
+      const smx = (lms[11].x + lms[12].x) / 2, hmx = (lms[23].x + lms[24].x) / 2;
+      poseLeanZ = Math.max(-0.35, Math.min(0.35, (hmx - smx) * 2.2));
+    }
+    /* gun gesture: right arm extended & straight -> fire in the pointed direction */
+    if (aR && aR.ext > 0.32 && aR.straight > 0.8) {
+      poseGunShow = true; handmsg.textContent = 'FIRE 🔫';
+      if (poseGunCd <= 0) { poseFire = true; poseGunCd = 0.3; }
+    } else { poseGunShow = false; handmsg.textContent = 'tracking'; }
+    lastPoseSeen = performance.now();
+  } else if (performance.now() - lastPoseSeen > 400) {
+    handmsg.textContent = 'step into frame';
   }
 }
-function updateHandControl(dt) {
-  if (handOn && handTarget.az != null && performance.now() - lastHandSeen < 600) {
-    const k = Math.min(1, dt * 4.5);
-    cam.az += (handTarget.az - cam.az) * k;
-    cam.pol += (handTarget.pol - cam.pol) * k;
-    cam.r += (handTarget.r - cam.r) * k;
-    clampCam();
+function updatePoseControl(dt) {
+  handEnergy = Math.max(0, handEnergy - dt * 1.6);
+  if (!poseOn) return;
+  poseGunCd -= dt;
+  const recent = performance.now() - lastPoseSeen < 700;
+  const lp = Math.min(1, dt * 7);
+  const drive = (arm, tgt) => {
+    if (!tgt) return;
+    arm.shoulder.rotation.x += (0 - arm.shoulder.rotation.x) * lp;
+    arm.shoulder.rotation.z += (tgt.sz - arm.shoulder.rotation.z) * lp;
+    arm.elbow.rotation.x += (0 - arm.elbow.rotation.x) * lp;
+    arm.elbow.rotation.z += (tgt.ez - arm.elbow.rotation.z) * lp;
+  };
+  if (recent) {
+    drive(armR, poseArmT.R); drive(armL, poseArmT.L);
+    singerHead.rotation.x += (poseHeadT.x - singerHead.rotation.x) * lp;
+    singerHead.rotation.z += (poseHeadT.z - singerHead.rotation.z) * lp;
+    singer.rotation.z += (poseLeanZ - singer.rotation.z) * lp;
   }
-  if (handEnergy > 0.5) {
-    const sp = new THREE.Vector3(); singerHead.getWorldPosition(sp);
-    if (Math.random() < handEnergy * 0.5) burst(sp.x + (Math.random() - 0.5) * 5, sp.y + Math.random() * 2.5, sp.z + (Math.random() - 0.5) * 4, Math.random() < 0.5 ? 0x9ef2ff : 0xff2ed9, 3);
+  singerGun.visible = !!poseGunShow;
+  if (poseFire) {
+    poseFire = false;
+    const mp = new THREE.Vector3(); singerMuzzle.getWorldPosition(mp);
+    const hp = new THREE.Vector3(); armR.hand.getWorldPosition(hp);
+    const dir = mp.clone().sub(hp).normalize(); if (!isFinite(dir.x) || dir.lengthSq() < 0.1) dir.set(0, 1, 0);
+    fireSingerShot(dir);
+    handEnergy = 1;
   }
-  handEnergy = Math.max(0, handEnergy - dt * 1.4);
 }
-bHand.addEventListener('click', () => { if (handBusy && !handOn) return; handOn ? disableHand() : enableHand(); });
+bHand.addEventListener('click', () => { if (mocapBusy && !mocapOn) return; mocapOn ? disablePose() : enablePose(); });
 
 /* ============================== MAIN LOOP ============================== */
 let worldX = 0, smokeT = 0, flickerT = 2.5;
@@ -2050,56 +2187,62 @@ function updatePuffs(dt) {
 
 function pickSingerMode() {
   const roll = Math.random();
-  if (roll < 0.40) { singerMode = 'strum'; singerModeT = 4 + Math.random() * 5; }
-  else if (roll < 0.58) { singerMode = 'hype'; singerModeT = 2.4 + Math.random() * 2; }
-  else if (roll < 0.74) { singerMode = 'handsUp'; singerModeT = 2 + Math.random() * 1.6; }
-  else if (roll < 0.87) { singerMode = 'point'; singerModeT = 1.8 + Math.random() * 1.4; }
+  if (roll < 0.42) { singerMode = 'strum'; singerModeT = 4 + Math.random() * 5; }
+  else if (roll < 0.60) { singerMode = 'hype'; singerModeT = 2.4 + Math.random() * 2; }
+  else if (roll < 0.76) { singerMode = 'handsUp'; singerModeT = 2 + Math.random() * 1.6; }
+  else if (roll < 0.88) { singerMode = 'point'; singerModeT = 1.8 + Math.random() * 1.4; }
   else { singerMode = 'gunfire'; singerModeT = 2.4 + Math.random() * 1.3; singerShots = 2 + (Math.random() * 2 | 0); singerShotT = 0.45; }
 }
-function fireSingerShot() {
+function fireSingerShot(dir) {
   const mp = new THREE.Vector3(); singerMuzzle.getWorldPosition(mp);
-  spawnBullet(mp.x, mp.y, mp.z, new THREE.Vector3((Math.random() - 0.5) * 0.16, 1, (Math.random() - 0.5) * 0.12), 38 + Math.random() * 8, 0xfff2b0, 1.5);
-  singerFlash.visible = true; singerFlash.material.rotation = Math.random() * 3; singerFlashLight.intensity = 34; singerFlashT = 0.06;
+  const d = dir || new THREE.Vector3((Math.random() - 0.5) * 0.16, 1, (Math.random() - 0.5) * 0.12);
+  spawnBullet(mp.x, mp.y, mp.z, d, 40 + Math.random() * 8, 0xfff2b0, 1.6);
+  singerFlash.visible = true; singerFlash.material.rotation = Math.random() * 3; singerFlashLight.intensity = 36; singerFlashT = 0.06;
   burst(mp.x, mp.y, mp.z, 0xffe6a0, 5);
   bang();
   singerPunch = 1;
 }
+function lerpArm(arm, tgt, lp) {
+  arm.shoulder.rotation.x += (tgt[0] - arm.shoulder.rotation.x) * lp;
+  arm.shoulder.rotation.z += (tgt[1] - arm.shoulder.rotation.z) * lp;
+  arm.elbow.rotation.x    += (tgt[2] - arm.elbow.rotation.x) * lp;
+}
 function updateSinger(dt, t) {
   singerPunch = Math.max(0, singerPunch - dt * 3);
   handRaise = Math.max(0, handRaise - dt);
-  singerModeT -= dt;
-  if (handRaise > 0.4 && singerMode !== 'gunfire') { singerMode = 'handsUp'; singerModeT = Math.max(singerModeT, 0.4); }
-  if (singerModeT <= 0 && singerMode !== 'gunfire') pickSingerMode();
-
   const groove = Math.sin(t * Math.PI * 2 * 1.16);
-  const hype = singerMode === 'hype' ? 1 : 0;
-  singer.position.y = 2.8 + Math.abs(groove) * (0.05 + bassS * 0.05 + hype * 0.07);
-  singer.rotation.z = groove * (0.05 + hype * 0.04);
-  singerHead.rotation.x = Math.sin(t * Math.PI * 2 * 2.33) * 0.09 - singerPunch * 0.22 + (singerMode === 'handsUp' || singerMode === 'gunfire' ? -0.25 : 0);
-  singerHead.rotation.z = Math.sin(t * 1.4) * 0.06;
+  singer.position.y = 2.78 + Math.abs(groove) * (0.045 + bassS * 0.05);
 
-  /* strum-arm pose per move */
-  let ax = -0.7, az = 0.5;
-  const strumSwing = Math.sin(t * Math.PI * 2 * 2.33) * (0.16 + singerPunch * 0.3 + bassS * 0.12);
-  if (singerMode === 'strum') { ax = -0.7; az = 0.5 + strumSwing; }
-  else if (singerMode === 'hype') { ax = -1.9; az = 0.2 + Math.sin(t * 10) * 0.5; }
-  else if (singerMode === 'handsUp') { ax = -2.7; az = 0.1 + Math.sin(t * 3) * 0.08; }
-  else if (singerMode === 'point') { ax = -1.35; az = -0.55; }
-  else if (singerMode === 'gunfire') {
-    ax = -2.55; az = 0.15; singerGun.visible = true;
-    if (singerShots > 0) {
-      singerShotT -= dt;
-      if (singerShotT <= 0) { fireSingerShot(); singerShots--; singerShotT = 0.3 + Math.random() * 0.14; }
-    } else if (singerModeT <= 0) pickSingerMode();
+  if (!poseOn) {
+    /* --- autonomous performance (mocap off) --- */
+    singerModeT -= dt;
+    if (handRaise > 0.4 && singerMode !== 'gunfire') { singerMode = 'handsUp'; singerModeT = Math.max(singerModeT, 0.4); }
+    if (singerModeT <= 0 && singerMode !== 'gunfire') pickSingerMode();
+    const hype = singerMode === 'hype' ? 1 : 0;
+    singer.rotation.z = groove * (0.05 + hype * 0.04);
+    singerHead.rotation.set(
+      Math.sin(t * Math.PI * 2 * 2.33) * 0.09 - singerPunch * 0.22 + (singerMode === 'handsUp' || singerMode === 'gunfire' ? -0.22 : 0),
+      0, Math.sin(t * 1.4) * 0.06);
+    const sw = Math.sin(t * Math.PI * 2 * 2.33) * (0.16 + singerPunch * 0.3 + bassS * 0.12);
+    let R = [-0.5, 0.9, -0.9], L = [-0.55, -1.0, -0.8]; singerGuitar.visible = true;
+    if (singerMode === 'strum') { R = [-0.5, 0.9 + sw, -0.9]; L = [-0.55, -1.0, -0.8]; }
+    else if (singerMode === 'hype') { const p = Math.sin(t * 10) * 0.4; R = [-1.0, 1.5 + p, -0.4]; L = [-1.0, -1.5 - p, -0.4]; singerGuitar.visible = false; }
+    else if (singerMode === 'handsUp') { R = [-0.3, 2.5, -0.1]; L = [-0.3, -2.5, -0.1]; singerGuitar.visible = false; }
+    else if (singerMode === 'point') { R = [-1.4, 0.1, -0.05]; L = [-0.2, -0.25, -0.3]; singerGuitar.visible = false; }
+    else if (singerMode === 'gunfire') {
+      R = [-1.3, 0.35, -0.2]; L = [-0.2, -0.25, -0.3]; singerGuitar.visible = false; singerGun.visible = true;
+      if (singerShots > 0) { singerShotT -= dt; if (singerShotT <= 0) { fireSingerShot(); singerShots--; singerShotT = 0.3 + Math.random() * 0.14; } }
+      else if (singerModeT <= 0) pickSingerMode();
+    }
+    if (singerMode !== 'gunfire') singerGun.visible = false;
+    const lp = Math.min(1, dt * 9);
+    lerpArm(armR, R, lp); lerpArm(armL, L, lp);
+  } else {
+    /* --- mocap puppeteers the body (updatePoseControl drives armR/armL/head/torso) --- */
+    singerGuitar.visible = false;
   }
-  if (singerMode !== 'gunfire') singerGun.visible = false;
-
-  const lp = Math.min(1, dt * 9);
-  strumArm.rotation.x += (ax - strumArm.rotation.x) * lp;
-  strumArm.rotation.z += (az - strumArm.rotation.z) * lp;
 
   if (singerFlashT > 0) { singerFlashT -= dt; if (singerFlashT <= 0) { singerFlash.visible = false; singerFlashLight.intensity = 0; } }
-
   const sp = new THREE.Vector3(); singerHead.getWorldPosition(sp);
   singerLight.position.set(sp.x, sp.y + 0.25, sp.z + 0.3);
 }
@@ -2183,6 +2326,7 @@ function frame(dt) {
   updateTrain(dt, t);
   updatePuffs(dt);
   updateSinger(dt, t);
+  updateDancer(dt, t);
   updateCowboys(dt, t);
   updateClouds(dt);
   updateSparks(dt);
@@ -2196,7 +2340,7 @@ function frame(dt) {
   updateBullets(dt);
   updateFX(dt, t);
   updateEngineSound(dt);
-  updateHandControl(dt);
+  updatePoseControl(dt);
   updateCamera(dt, t);
   if ((started && !audio.paused) || window.__forceTime != null) updateCues();
 
@@ -2235,6 +2379,7 @@ window.__snap = () => {
 };
 window.__fx = {
   volley, pyramidRise, spawnLyric, setCam: (az, pol, r) => Object.assign(cam, { az, pol, r }),
+  setTgt: (x, y, z) => cam.tgt.set(x, y, z),
   prop: (key, z) => spawnProp(OBJECT_BUILDERS[key], { z: z != null ? z : 7.5, x: 22 }),
   place: (key, x, z) => spawnProp(OBJECT_BUILDERS[key], { x, z }),
   sign: () => spawnProp(buildAicanfeelSign, { z: -10.5, x: 22 }),

@@ -492,18 +492,16 @@ function build_velvetrope(THREE, P) {
     glowRing.rotation.x = Math.PI / 2; glowRing.position.y = 1.02; p.add(glowRing);
     const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.11, 0.12, 10), goldM);
     cap.position.y = topY - 0.09; p.add(cap);
-    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.19, 10, 8), goldM);
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.19, 10, 8), P.emis(P.COL.gold, 0.7));
     ball.position.y = topY + 0.12; p.add(ball);
-    const halo = new THREE.Mesh(new THREE.SphereGeometry(0.205, 10, 8), P.emis(P.COL.gold, 0.9));
-    halo.position.y = topY + 0.12; halo.material.wireframe = true; p.add(halo);
     p.position.x = px;
     return p;
   }
   g.add(post(-postX), post(postX));
 
   const ropeMat = P.neon(P.COL.crimson);
-  const glowMat = P.emis(P.COL.crimson, 1.1);
-  const N = 14, r0 = 0.075;
+  const glowMat = P.emis(P.COL.crimson, 0.8);
+  const N = 10, r0 = 0.075;
   const pts = [];
   for (let i = 0; i <= N; i++) {
     const t = i / N, x = -postX + 2 * postX * t;
