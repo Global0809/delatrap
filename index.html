@@ -53,20 +53,16 @@
   /* ============ LIQUID GLASS SYSTEM ============ */
   .glass {
     position: relative;
-    background: linear-gradient(155deg, rgba(60,30,90,.34), rgba(20,10,40,.22));
-    backdrop-filter: blur(20px) saturate(150%);
-    -webkit-backdrop-filter: blur(20px) saturate(150%);
-    border: 1px solid rgba(255,255,255,.16);
+    /* solid frosted look (no backdrop-filter — that samples the WebGL canvas and
+       intermittently composites to black over the scene, esp. when GPU load spikes) */
+    background: linear-gradient(155deg, rgba(48,27,74,.88), rgba(15,9,30,.84));
+    border: 1px solid rgba(255,255,255,.18);
     border-radius: 22px;
     box-shadow:
-      0 8px 40px rgba(0,0,0,.45),
-      inset 0 1px 0 rgba(255,255,255,.35),
-      inset 0 -18px 40px rgba(120,40,200,.10);
+      0 10px 44px rgba(0,0,0,.5),
+      inset 0 1px 0 rgba(255,255,255,.26),
+      inset 0 -18px 40px rgba(120,40,200,.12);
     overflow: hidden;
-    /* promote to its own compositor layer — prevents backdrop-filter black-flicker over WebGL */
-    transform: translateZ(0);
-    isolation: isolate;
-    -webkit-backface-visibility: hidden; backface-visibility: hidden;
   }
   /* top sheen */
   .glass::before {
@@ -116,9 +112,8 @@
     margin-top: 12px; padding: 15px 48px; font-size: 16px; cursor: pointer;
     font-family: 'Segoe UI', system-ui, sans-serif; font-weight: 700; letter-spacing: .26em; text-indent: .26em;
     color: #fff; border-radius: 999px; position: relative; overflow: hidden;
-    background: linear-gradient(180deg, rgba(255,90,222,.55), rgba(150,30,220,.4));
+    background: linear-gradient(180deg, rgba(255,90,222,.9), rgba(150,30,220,.85));
     border: 1px solid rgba(255,190,242,.7);
-    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
     box-shadow: 0 6px 26px rgba(255,46,217,.4), inset 0 1px 6px rgba(255,255,255,.55);
     transition: transform .18s ease, box-shadow .18s ease, background .18s;
   }
@@ -191,6 +186,37 @@
     #time { display: none; }
   }
 
+  /* ---------- hand-tracking HUD ---------- */
+  #handhud {
+    position: fixed; top: 16px; right: 16px; z-index: 11; width: 200px;
+    opacity: 0; transform: translateY(-10px) scale(.96); transition: opacity .4s, transform .4s;
+    pointer-events: none;
+  }
+  #handhud.on { opacity: 1; transform: none; }
+  #handhud .frame {
+    position: relative; border-radius: 14px; overflow: hidden;
+    border: 1px solid rgba(69,232,255,.5); background: #06030f;
+    box-shadow: 0 0 24px rgba(69,232,255,.28), inset 0 0 22px rgba(69,232,255,.12);
+  }
+  #handcanvas { display: block; width: 100%; height: auto; }
+  #handhud .lbl {
+    position: absolute; top: 6px; left: 9px; font-size: 9px; letter-spacing: .28em;
+    color: #9fe9ff; text-shadow: 0 0 8px #45e8ff; pointer-events: none;
+  }
+  #handhud .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #45e8ff; box-shadow: 0 0 8px #45e8ff; margin-right: 6px; vertical-align: middle; animation: hpulse 1.2s infinite; }
+  @keyframes hpulse { 0%,100% { opacity: .3 } 50% { opacity: 1 } }
+  #handhud .brackets {
+    position: absolute; inset: 5px; pointer-events: none; opacity: .85;
+    background:
+      linear-gradient(#45e8ff,#45e8ff) left top, linear-gradient(#45e8ff,#45e8ff) left top,
+      linear-gradient(#45e8ff,#45e8ff) right top, linear-gradient(#45e8ff,#45e8ff) right top,
+      linear-gradient(#45e8ff,#45e8ff) left bottom, linear-gradient(#45e8ff,#45e8ff) left bottom,
+      linear-gradient(#45e8ff,#45e8ff) right bottom, linear-gradient(#45e8ff,#45e8ff) right bottom;
+    background-repeat: no-repeat;
+    background-size: 13px 2px, 2px 13px, 13px 2px, 2px 13px, 13px 2px, 2px 13px, 13px 2px, 2px 13px;
+  }
+  #handmsg { position: absolute; bottom: 5px; left: 9px; right: 9px; font-size: 9px; letter-spacing: .1em; color: #cfe4f7; text-align: right; pointer-events: none; }
+
   #err {
     position: fixed; top: 12px; right: 14px; z-index: 60; max-width: 420px; display: none;
     padding: 10px 14px; font-size: 12px; background: #3a0a1acc; border: 1px solid #ff4b7d;
@@ -227,10 +253,24 @@
       <div class="ibtn" id="bSfx" title="Sound FX">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 9v6h3.5L13 19V5L7.5 9H4z" fill="currentColor" stroke="none"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/><path d="M19 6a8.5 8.5 0 0 1 0 12"/></svg>
       </div>
+      <div class="ibtn off" id="bHand" title="Hand control (webcam)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 11V6a1.3 1.3 0 0 1 2.6 0v4.5m0-.5V4.6a1.3 1.3 0 0 1 2.6 0V10m0-.2V5.3a1.3 1.3 0 0 1 2.6 0V12m0-2.1a1.3 1.3 0 0 1 2.6 0v3.5c0 3-2.1 5.6-5.5 5.6-2.3 0-3.5-.8-4.8-2.5l-2.3-3.1a1.35 1.35 0 0 1 2.1-1.7L8 13"/></svg>
+      </div>
       <div class="ibtn" id="bReset" title="Reset view">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="6.5"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- hand-tracking futuristic HUD -->
+<video id="handvid" muted playsinline style="position:fixed;width:2px;height:2px;opacity:0;pointer-events:none;left:-10px;top:-10px"></video>
+<div id="handhud">
+  <div class="frame">
+    <canvas id="handcanvas" width="200" height="150"></canvas>
+    <div class="lbl"><span class="dot"></span>HAND&nbsp;CONTROL</div>
+    <div class="brackets"></div>
+    <div id="handmsg">off</div>
   </div>
 </div>
 
@@ -268,7 +308,8 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 const errBox = document.getElementById('err');
-const showErr = (m) => { errBox.style.display = 'block'; errBox.textContent = m; };
+let errTimer = 0;
+const showErr = (m) => { errBox.style.display = 'block'; errBox.textContent = m; clearTimeout(errTimer); errTimer = setTimeout(() => { errBox.style.display = 'none'; }, 7000); };
 window.addEventListener('error', e => showErr('Error: ' + e.message));
 
 /* ============================== CONSTANTS ============================== */
@@ -1858,6 +1899,106 @@ addEventListener('keydown', e => {
   if (e.code === 'Space' && started) { e.preventDefault(); bPlay.click(); }
 });
 
+/* ============================== HAND-MOTION CONTROL (webcam + MediaPipe) ============================== */
+const bHand = document.getElementById('bHand');
+const handvid = document.getElementById('handvid');
+const handcanvas = document.getElementById('handcanvas');
+const hctx = handcanvas.getContext('2d');
+const handhud = document.getElementById('handhud');
+const handmsg = document.getElementById('handmsg');
+let handOn = false, handLandmarker = null, handStream = null, handBusy = false;
+let handEnergy = 0, lastHandSeen = -9, prevOpen = 0;
+const handTarget = { az: null, pol: null, r: null };
+const HAND_LINKS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+
+async function initHandModel() {
+  if (handLandmarker) return true;
+  handmsg.textContent = 'loading AI…';
+  try {
+    const V = '0.10.14';
+    const vision = await import(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${V}`);
+    const fileset = await vision.FilesetResolver.forVisionTasks(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${V}/wasm`);
+    handLandmarker = await vision.HandLandmarker.createFromOptions(fileset, {
+      baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task', delegate: 'GPU' },
+      runningMode: 'VIDEO', numHands: 1,
+    });
+    return true;
+  } catch (e) { showErr('Hand AI failed to load: ' + e.message); handmsg.textContent = 'AI load failed'; return false; }
+}
+async function enableHand() {
+  handhud.classList.add('on'); handmsg.textContent = 'starting…';
+  if (!(await initHandModel())) { disableHand(); return; }
+  handmsg.textContent = 'camera…';
+  try {
+    handStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 480, height: 360 } });
+  } catch (e) { showErr('Camera blocked — hand control needs webcam access. Allow it and try again.'); handmsg.textContent = 'camera denied'; disableHand(); return; }
+  handvid.srcObject = handStream;
+  try { await handvid.play(); } catch (e) {}
+  handOn = true; autoCam = false;
+  bHand.classList.remove('off'); bHand.title = 'Hand control: ON';
+  handmsg.textContent = 'show your hand';
+  requestAnimationFrame(handLoop);
+}
+function disableHand() {
+  handOn = false; handhud.classList.remove('on');
+  bHand.classList.add('off'); bHand.title = 'Hand control (webcam)';
+  if (handStream) { handStream.getTracks().forEach(t => t.stop()); handStream = null; }
+  handvid.srcObject = null;
+  handTarget.az = handTarget.pol = handTarget.r = null;
+}
+function handLoop(ts) {
+  if (!handOn) return;
+  requestAnimationFrame(handLoop);
+  if (!handLandmarker || handvid.readyState < 2 || handBusy) return;
+  handBusy = true;
+  let res = null;
+  try { res = handLandmarker.detectForVideo(handvid, ts || performance.now()); } catch (e) {}
+  handBusy = false;
+  const W = handcanvas.width, H = handcanvas.height;
+  hctx.clearRect(0, 0, W, H);
+  hctx.save(); hctx.globalAlpha = 0.5; hctx.translate(W, 0); hctx.scale(-1, 1); hctx.drawImage(handvid, 0, 0, W, H); hctx.restore();
+  hctx.fillStyle = 'rgba(6,3,16,0.34)'; hctx.fillRect(0, 0, W, H);
+  if (res && res.landmarks && res.landmarks.length) {
+    const lm = res.landmarks[0];
+    const px = (p) => [(1 - p.x) * W, p.y * H];
+    hctx.lineWidth = 2.4; hctx.strokeStyle = '#45e8ff'; hctx.shadowColor = '#45e8ff'; hctx.shadowBlur = 8;
+    hctx.beginPath();
+    for (const [a, b] of HAND_LINKS) { const A = px(lm[a]), B = px(lm[b]); hctx.moveTo(A[0], A[1]); hctx.lineTo(B[0], B[1]); }
+    hctx.stroke();
+    hctx.shadowBlur = 10; hctx.fillStyle = '#ff2ed9';
+    for (const p of lm) { const q = px(p); hctx.beginPath(); hctx.arc(q[0], q[1], 2.5, 0, 7); hctx.fill(); }
+    hctx.shadowBlur = 0;
+    const cx = 1 - lm[9].x, cy = lm[9].y;
+    const pinch = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y);
+    let openv = 0; for (const ti of [8, 12, 16, 20]) openv += Math.hypot(lm[ti].x - lm[0].x, lm[ti].y - lm[0].y); openv /= 4;
+    handTarget.az = CAM0.az + (cx - 0.5) * 3.6;
+    handTarget.pol = 0.35 + Math.max(0, Math.min(1, cy)) * 1.5;
+    handTarget.r = 8 + Math.max(0, Math.min(1, (pinch - 0.03) / 0.26)) * 26;
+    const openNow = Math.max(0, Math.min(1, (openv - 0.28) / 0.16));
+    if (openNow - prevOpen > 0.4) handEnergy = 1;          // quick spread => neon burst
+    prevOpen = openNow;
+    lastHandSeen = performance.now();
+    handmsg.textContent = pinch < 0.06 ? 'pinch · zoom' : 'tracking';
+  } else if (performance.now() - lastHandSeen > 350) {
+    handmsg.textContent = 'show your hand';
+  }
+}
+function updateHandControl(dt) {
+  if (handOn && handTarget.az != null && performance.now() - lastHandSeen < 600) {
+    const k = Math.min(1, dt * 4.5);
+    cam.az += (handTarget.az - cam.az) * k;
+    cam.pol += (handTarget.pol - cam.pol) * k;
+    cam.r += (handTarget.r - cam.r) * k;
+    clampCam();
+  }
+  if (handEnergy > 0.5) {
+    const sp = new THREE.Vector3(); singerHead.getWorldPosition(sp);
+    if (Math.random() < handEnergy * 0.5) burst(sp.x + (Math.random() - 0.5) * 5, sp.y + Math.random() * 2.5, sp.z + (Math.random() - 0.5) * 4, Math.random() < 0.5 ? 0x9ef2ff : 0xff2ed9, 3);
+  }
+  handEnergy = Math.max(0, handEnergy - dt * 1.4);
+}
+bHand.addEventListener('click', () => { if (handBusy && !handOn) return; handOn ? disableHand() : enableHand(); });
+
 /* ============================== MAIN LOOP ============================== */
 let worldX = 0, smokeT = 0, flickerT = 2.5;
 const clock = new THREE.Clock();
@@ -2017,9 +2158,10 @@ function updateFX(dt, t) {
   } else bass = 0.35 + 0.15 * Math.sin(t * 4.6);
   bassS += (bass - bassS) * Math.min(1, dt * 9);
 
-  const pulse = 0.95 + bassS * 0.3 + iceK * 0.4;
+  const pulse = 0.95 + bassS * 0.3 + iceK * 0.4 + handEnergy * 0.5;
   matPink.color.setHex(COL.pink).multiplyScalar(pulse);
-  matCyan.color.setHex(COL.cyan).multiplyScalar(0.95 + bassS * 0.22 + iceK * 0.8);
+  matCyan.color.setHex(COL.cyan).multiplyScalar(0.95 + bassS * 0.22 + iceK * 0.8 + handEnergy * 0.6);
+  bloom.strength = 0.62 + handEnergy * 0.6 + bassS * 0.12;
   signMats.forEach(m => {
     m.color.setRGB(1.45 + goldK * 0.9 + bassS * 0.25, 1.45 + goldK * 0.55, 1.45 + goldK * 0.1);
   });
@@ -2054,6 +2196,7 @@ function frame(dt) {
   updateBullets(dt);
   updateFX(dt, t);
   updateEngineSound(dt);
+  updateHandControl(dt);
   updateCamera(dt, t);
   if ((started && !audio.paused) || window.__forceTime != null) updateCues();
 
