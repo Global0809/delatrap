@@ -876,7 +876,7 @@ containerCar(-16.9, 0x39ff9e, true);
 
 /* ============================== THE SINGER (modeled on the artist) ============================== */
 const singer = new THREE.Group();
-let singerHead, singerGun, singerMuzzle, singerFlash, singerFlashLight, armR, armL, singerGuitar, singerTorso;
+let singerHead, singerGun, singerMuzzle, singerFlash, singerFlashLight, armR, armL, singerGuitar, singerTorso, legR, legL;
 {
   const skin  = new THREE.MeshStandardMaterial({ color: 0xca8b5c, roughness: .7, metalness: 0, emissive: 0x2a160a, emissiveIntensity: .35, flatShading: true });
   const ink   = new THREE.MeshStandardMaterial({ color: 0x6b4630, roughness: .75, metalness: 0, flatShading: true });   // tattoo shading
@@ -887,12 +887,18 @@ let singerHead, singerGun, singerMuzzle, singerFlash, singerFlashLight, armR, ar
   const pants = new THREE.MeshStandardMaterial({ color: 0x14121c, roughness: .6, flatShading: true });
   const lensM = new THREE.MeshBasicMaterial({ color: 0x8a1420, toneMapped: false });   // dark-red shades (no specular)
 
-  /* legs + sneakers */
-  for (const s of [-1, 1]) {
-    const leg = box(0.13, 0.5, 0.15, pants); leg.position.set(s * 0.1, 0.25, 0); singer.add(leg);
-    const shoe = box(0.15, 0.08, 0.26, matDark2); shoe.position.set(s * 0.1, 0.04, 0.05); singer.add(shoe);
-    const lace = box(0.15, 0.02, 0.02, matCyan); lace.position.set(s * 0.1, 0.11, 0.14); singer.add(lace);
+  /* articulated legs (hip -> thigh -> knee -> shin -> shoe) */
+  function buildLeg(side) {
+    const hip = new THREE.Group(); hip.position.set(side * 0.1, 0.54, 0);
+    const thigh = box(0.14, 0.3, 0.16, pants); thigh.geometry = thigh.geometry.clone(); thigh.geometry.translate(0, -0.15, 0); hip.add(thigh);
+    const knee = new THREE.Group(); knee.position.y = -0.3; hip.add(knee);
+    const shin = box(0.12, 0.26, 0.14, pants); shin.geometry = shin.geometry.clone(); shin.geometry.translate(0, -0.13, 0); knee.add(shin);
+    const shoe = box(0.15, 0.08, 0.27, matDark2); shoe.position.set(0, -0.28, 0.05); knee.add(shoe);
+    const lace = box(0.15, 0.02, 0.02, matCyan); lace.position.set(0, -0.21, 0.14); knee.add(lace);
+    hip.rotation.z = side * -0.03;
+    singer.add(hip); return { hip, knee };
   }
+  legR = buildLeg(1); legL = buildLeg(-1);
 
   /* blue sleeveless jersey */
   singerTorso = new THREE.Group(); singerTorso.position.y = 0.5; singer.add(singerTorso);
@@ -2006,8 +2012,10 @@ const handmsg = document.getElementById('handmsg');
 let mocapOn = false, poseLandmarker = null, mocapStream = null, mocapBusy = false;
 let lastPoseSeen = -9, poseGunCd = 0, poseFire = false, poseGunShow = false, handEnergy = 0;
 const poseHeadT = { x: 0, z: 0 };
-let poseLeanZ = 0;
+let poseLeanZ = 0, poseHeadY = 0, poseRecoil = 0;
 const poseArmT = { R: null, L: null };
+const poseLegT = { R: null, L: null };
+const poseRoot = { x: 0 };
 const POSE_LINKS = [[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[0,11],[0,12]];
 const clampA = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return Math.max(-2.4, Math.min(2.4, a)); };
 
@@ -2088,17 +2096,23 @@ function poseLoop(ts) {
 
     if (vis(0) && vis(11) && vis(12)) {
       const mx = (lms[11].x + lms[12].x) / 2, my = (lms[11].y + lms[12].y) / 2;
-      poseHeadT.z = Math.max(-0.5, Math.min(0.5, (mx - lms[0].x) * 3));
-      poseHeadT.x = Math.max(-0.4, Math.min(0.5, (lms[0].y - my + 0.16) * 2));
+      poseHeadT.z = Math.max(-0.75, Math.min(0.75, (mx - lms[0].x) * 5.5));       // head tilt
+      poseHeadT.x = Math.max(-0.7, Math.min(0.85, (lms[0].y - my + 0.16) * 4.5)); // look up / down
+      poseHeadY = Math.max(-0.8, Math.min(0.8, (mx - lms[0].x) * 4.5));           // head turn
     }
     if (vis(11) && vis(12) && vis(23) && vis(24)) {
       const smx = (lms[11].x + lms[12].x) / 2, hmx = (lms[23].x + lms[24].x) / 2;
-      poseLeanZ = Math.max(-0.35, Math.min(0.35, (hmx - smx) * 2.2));
+      poseLeanZ = Math.max(-0.45, Math.min(0.45, (hmx - smx) * 3.2));
+      poseRoot.x = 0.5 - hmx;                    // step left / right along the train
     }
-    /* gun gesture: right arm extended & straight -> fire in the pointed direction */
-    if (aR && aR.ext > 0.32 && aR.straight > 0.8) {
+    const lgR = armAngles(lms, vis, 24, 26, 28), lgL = armAngles(lms, vis, 23, 25, 27);
+    poseLegT.R = lgR ? { sz: lgR.sz, ez: lgR.ez } : null;
+    poseLegT.L = lgL ? { sz: lgL.sz, ez: lgL.ez } : null;
+    /* gun gesture: right arm straight/extended OR thrust toward camera -> fire */
+    const towardR = vis(16) && vis(12) && (lms[12].z - lms[16].z) > 0.1;
+    if (aR && ((aR.ext > 0.28 && aR.straight > 0.72) || (towardR && aR.ext > 0.2))) {
       poseGunShow = true; handmsg.textContent = 'FIRE 🔫';
-      if (poseGunCd <= 0) { poseFire = true; poseGunCd = 0.3; }
+      if (poseGunCd <= 0) { poseFire = true; poseGunCd = 0.17; }
     } else { poseGunShow = false; handmsg.textContent = 'tracking'; }
     lastPoseSeen = performance.now();
   } else if (performance.now() - lastPoseSeen > 400) {
@@ -2107,26 +2121,39 @@ function poseLoop(ts) {
 }
 function updatePoseControl(dt) {
   handEnergy = Math.max(0, handEnergy - dt * 1.6);
+  poseRecoil = Math.max(0, poseRecoil - dt * 6);
   if (!poseOn) return;
   poseGunCd -= dt;
   const recent = performance.now() - lastPoseSeen < 700;
-  const lp = Math.min(1, dt * 7);
-  const drive = (arm, tgt) => {
+  const lp = Math.min(1, dt * 14);     // snappy, not laggy
+  const G = 1.3;                        // amplify motion ~30%
+  const driveArm = (arm, tgt, kick) => {
     if (!tgt) return;
     arm.shoulder.rotation.x += (0 - arm.shoulder.rotation.x) * lp;
-    arm.shoulder.rotation.z += (tgt.sz - arm.shoulder.rotation.z) * lp;
+    arm.shoulder.rotation.z += (tgt.sz * G + kick - arm.shoulder.rotation.z) * lp;
     arm.elbow.rotation.x += (0 - arm.elbow.rotation.x) * lp;
-    arm.elbow.rotation.z += (tgt.ez - arm.elbow.rotation.z) * lp;
+    arm.elbow.rotation.z += (tgt.ez * G - arm.elbow.rotation.z) * lp;
+  };
+  const driveLeg = (leg, tgt) => {
+    if (!tgt) return;
+    leg.hip.rotation.x += (0 - leg.hip.rotation.x) * lp;
+    leg.hip.rotation.z += (tgt.sz * G - leg.hip.rotation.z) * lp;
+    leg.knee.rotation.x += (0 - leg.knee.rotation.x) * lp;
+    leg.knee.rotation.z += (tgt.ez * G * 0.8 - leg.knee.rotation.z) * lp;
   };
   if (recent) {
-    drive(armR, poseArmT.R); drive(armL, poseArmT.L);
-    singerHead.rotation.x += (poseHeadT.x - singerHead.rotation.x) * lp;
-    singerHead.rotation.z += (poseHeadT.z - singerHead.rotation.z) * lp;
+    driveArm(armR, poseArmT.R, poseRecoil * 0.5); driveArm(armL, poseArmT.L, 0);
+    driveLeg(legR, poseLegT.R); driveLeg(legL, poseLegT.L);
+    singerHead.rotation.x += (poseHeadT.x * G - singerHead.rotation.x) * lp;
+    singerHead.rotation.z += (poseHeadT.z * G - singerHead.rotation.z) * lp;
+    singerHead.rotation.y += (poseHeadY * G - singerHead.rotation.y) * lp;
     singer.rotation.z += (poseLeanZ - singer.rotation.z) * lp;
+    const tx = Math.max(-2.55, Math.min(-0.5, -1.55 + poseRoot.x * 3.2));   // slide along the car
+    singer.position.x += (tx - singer.position.x) * Math.min(1, dt * 8);
   }
   singerGun.visible = !!poseGunShow;
   if (poseFire) {
-    poseFire = false;
+    poseFire = false; poseRecoil = 1;
     const mp = new THREE.Vector3(); singerMuzzle.getWorldPosition(mp);
     const hp = new THREE.Vector3(); armR.hand.getWorldPosition(hp);
     const dir = mp.clone().sub(hp).normalize(); if (!isFinite(dir.x) || dir.lengthSq() < 0.1) dir.set(0, 1, 0);
@@ -2237,6 +2264,11 @@ function updateSinger(dt, t) {
     if (singerMode !== 'gunfire') singerGun.visible = false;
     const lp = Math.min(1, dt * 9);
     lerpArm(armR, R, lp); lerpArm(armL, L, lp);
+    // return to base stance
+    singer.position.x += (-1.55 - singer.position.x) * 0.1;
+    legR.hip.rotation.z += (0.03 - legR.hip.rotation.z) * 0.2; legL.hip.rotation.z += (-0.03 - legL.hip.rotation.z) * 0.2;
+    legR.hip.rotation.x *= 0.85; legL.hip.rotation.x *= 0.85;
+    legR.knee.rotation.set(0, 0, legR.knee.rotation.z * 0.85); legL.knee.rotation.set(0, 0, legL.knee.rotation.z * 0.85);
   } else {
     /* --- mocap puppeteers the body (updatePoseControl drives armR/armL/head/torso) --- */
     singerGuitar.visible = false;
